@@ -214,3 +214,124 @@ static int read_file(const char *path, OutputBuffer *buffer)
     fclose(file);
     return 0;
 }
+
+
+// One token kind per thing the parser must tell apart. ** is its own kind
+// instead of two TOK_STAR, so the parser can give it a higher precedence
+// than * without looking at the next token. TOK_EOL stands for both a
+// newline and the end of the file, because in both cases the line has
+// ended and the error rules treat them the same way.
+typedef enum {
+    TOK_NUMBER,
+    TOK_PLUS,
+    TOK_MINUS,
+    TOK_STAR,
+    TOK_SLASH,
+    TOK_POWER,
+    TOK_LPAREN,
+    TOK_RPAREN,
+    TOK_EOL,
+    TOK_INVALID
+} TokenType;
+
+
+// position is stored in the token itself, because every error is reported
+// at the start of a token. The parser can then report the position of the
+// token it was looking at without asking the tokenizer again. value is only
+// meaningful when type is TOK_NUMBER.
+typedef struct {
+    TokenType type;
+    size_t position;
+    Value value;
+} Token;
+
+
+// The tokenizer works on the whole file in memory. index is the 0-based
+// offset of the next unread character, so the 1-based position of a
+// character is index + 1. No separate position counter is needed, and
+// newlines and comment lines are counted automatically because index
+// moves over every character of the file. The end is decided by length and
+// not by '\0', because a real '\0' byte inside the file is data.
+typedef struct {
+    const char *text;
+    size_t length;
+    size_t index;
+} Tokenizer;
+
+
+// Only spaces and tabs are skipped, because the task allows only these
+// between tokens. A '\n' must not be skipped here: it ends the line, and
+// the line loop needs to see it as TOK_EOL.
+// The position is taken as index + 1 before index moves, so it always
+// points at the first character of the token. This is how errors get the
+// 1-based position without a separate counter.
+// For TOK_EOL, index is not advanced. Then the file end gives
+// position length + 1 and a '\n' gives its own position, which are exactly
+// the positions the task wants for "missing operand" and "missing )".
+// * looks one character ahead for a second * so that ** becomes one token;
+// the length check comes first so the lookahead never reads past the text.
+// Any other character, including '#' in the middle of a line, becomes
+// TOK_INVALID and index still moves by one, otherwise the next call would
+// return the same invalid character forever.
+static Token next_token(Tokenizer *t)
+{
+    while (t->index < t->length && (t->text[t->index] == ' ' || t->text[t->index] == '\t')) {
+        t->index++;
+    }
+    Token token = {0};
+    token.position = t->index + 1;
+
+    if (t->index >= t->length) {
+        token.type = TOK_EOL;
+        return token;
+    }
+
+    if (t->text[t->index] == '\n') {
+        token.type = TOK_EOL;
+        return token;
+    }
+
+    switch (t->text[t->index]) {
+        case '+':
+            token.type = TOK_PLUS;
+            t->index++;
+            break;
+
+        case '-':
+            token.type = TOK_MINUS;
+            t->index++;
+            break;
+
+        case '/':
+            token.type = TOK_SLASH;
+            t->index++;
+            break;
+
+        case '(':
+            token.type = TOK_LPAREN;
+            t->index++;
+            break;
+
+        case ')':
+            token.type = TOK_RPAREN;
+            t->index++;
+            break;
+
+        case '*':
+            if (t->index + 1 < t->length && t->text[t->index + 1] == '*') {
+                token.type = TOK_POWER;
+                t->index += 2;
+            } else {
+                token.type = TOK_STAR;
+                t->index++;
+            }
+            break;
+
+        default:
+            token.type = TOK_INVALID;
+            t->index++;
+            break;
+    }
+
+    return token;
+}
