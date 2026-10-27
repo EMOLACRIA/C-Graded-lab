@@ -386,3 +386,62 @@ static Token next_token(Tokenizer *t)
 
     return token;
 }
+
+
+// Mixed arithmetic is done in double: if only one side is a float, the
+// integer side is converted here, so the three operation functions below do
+// not each need their own conversion. Integers above 2^53 can lose
+// precision in this conversion; the float tests use small numbers.
+static double value_as_double(Value value)
+{
+    return value.is_float ? value.real : (double)value.integer;
+}
+
+// This is where the int/float decision is made. One float operand is
+// enough to make the result a float, so the test is "a || b". Only
+// int op int stays in long long arithmetic, which is why 7 / 2 can later
+// truncate while 7 / 2.0 does not. Overflow is not checked, because the
+// task says the tests never overflow.
+static Value value_add(Value a, Value b)
+{
+    Value result = {0};
+
+    if (a.is_float || b.is_float) {
+        result.is_float = 1;
+        result.real = value_as_double(a) + value_as_double(b);
+    } else {
+        result.integer = a.integer + b.integer;
+    }
+
+    return result;
+}
+
+// Same rule as value_add: the result is a float if either operand is.
+static Value value_sub(Value a, Value b)
+{
+    Value result = {0};
+
+    if (a.is_float || b.is_float) {
+        result.is_float = 1;
+        result.real = value_as_double(a) - value_as_double(b);
+    } else {
+        result.integer = a.integer - b.integer;
+    }
+
+    return result;
+}
+
+// Same rule as value_add: the result is a float if either operand is.
+static Value value_mul(Value a, Value b)
+{
+    Value result = {0};
+
+    if (a.is_float || b.is_float) {
+        result.is_float = 1;
+        result.real = value_as_double(a) * value_as_double(b);
+    } else {
+        result.integer = a.integer * b.integer;
+    }
+
+    return result;
+}
