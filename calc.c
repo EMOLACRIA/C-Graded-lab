@@ -445,3 +445,32 @@ static Value value_mul(Value a, Value b)
 
     return result;
 }
+
+// The zero check looks only at the divisor and uses its own type, so
+// 1.5 / 0 and 10 / 0.0 are errors just like 10 / 0, as the task requires.
+// The error goes to right_pos, the start of the right operand, not to the
+// '/' operator, because the task reports division by zero there.
+// The check comes before the division: an integer division by zero is
+// undefined behaviour, and a float one would give inf instead of an error.
+// A zero Value is returned after the error so the caller has something to
+// carry on with; it then sees first_error_pos is set and stops.
+static Value value_div(Value a, Value b, size_t right_pos)
+{
+    Value result = {0};
+
+    if (b.is_float ? b.real == 0.0 : b.integer == 0) {
+        set_error(right_pos);
+        return result;
+    }
+
+    if (a.is_float || b.is_float) {
+        result.is_float = 1;
+        result.real = value_as_double(a) / value_as_double(b);
+    } else {
+        // C truncates integer division toward zero, which is what the task
+        // wants: 7 / 2 is 3 and (0 - 7) / 2 is -3. No extra code is needed.
+        result.integer = a.integer / b.integer;
+    }
+
+    return result;
+}
