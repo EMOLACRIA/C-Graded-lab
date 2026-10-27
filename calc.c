@@ -171,3 +171,46 @@ static void output_free(OutputBuffer *buffer)
     buffer->length = 0;
     buffer->capacity = 0;
 }
+
+
+// The whole file is read into memory at once because error positions count
+// every character from the start of the file, comments included. With the
+// file in one buffer, a position is just an index plus 1 and no separate
+// counter has to be carried across lines.
+// The file is read in 64 KB pieces into output_append, so the buffer grows
+// by doubling and large files are not copied again on every read.
+// "rb" is used so the bytes are not changed on the way in, which would
+// shift the positions.
+// fread returning 0 means either end of file or a read error, so ferror is
+// checked afterwards: a path that is a folder opens fine but fails here.
+// On failure the buffer is freed here, so the caller has nothing to clean up.
+// A '\0' is stored after the data but length is decreased again, so
+// functions such as strtod cannot read past the end, while a real '\0' byte
+// in the file still counts as data and is reported as an invalid character.
+// Returns 0 on success and -1 if the file cannot be opened or read.
+static int read_file(const char *path, OutputBuffer *buffer)
+{
+    FILE *file = fopen(path, "rb");
+    char chunk[65536];
+    size_t n;
+
+    if (file == NULL) {
+        return -1;
+    }
+
+    while ((n = fread(chunk, 1, sizeof chunk, file)) > 0){
+        output_append(buffer, chunk, n);
+    }
+
+    if (ferror(file)) {
+        fclose(file);
+        output_free(buffer);
+        return -1;
+    }
+
+    output_append(buffer, "", 1);
+
+    buffer->length--;
+    fclose(file);
+    return 0;
+}
