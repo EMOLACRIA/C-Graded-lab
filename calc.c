@@ -15,3 +15,9 @@
 #define STUDENT_NAME "emirhan"
 #define STUDENT_LASTNAME "kucukyilmaz"
 #define STUDENT_ID "251ADB105"
+
+typedef struct {
+    long long integer;
+    double real;
+    int is_float;
+} Value;
