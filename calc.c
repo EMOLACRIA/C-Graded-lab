@@ -106,3 +106,68 @@ static void output_append(OutputBuffer *buffer, const char *bytes, size_t n)
     memcpy(buffer->data + buffer->length, bytes, n);
     buffer->length += n;
 }
+
+
+// Formats use exactly the task's rules: %lld for integers and %.15g for
+// floats, so 0.1 + 0.2 prints 0.3. The line is built in a small local array
+// because one result is always short, which avoids a heap allocation per
+// line in files with millions of lines. The size check exists so a failed
+// or truncated snprintf can never put a cut-off number into the output.
+static void output_value(OutputBuffer *buffer, Value value)
+{
+    char line[64];
+    int count;
+
+    if (value.is_float) {
+        count = snprintf(line, sizeof line, "%.15g\n", value.real);
+    }
+    else {
+        count = snprintf(line, sizeof line, "%lld\n", value.integer);
+    }
+
+    if (count < 0 || (size_t)count >= sizeof line) {
+        fprintf(stderr, "Cannot format result\n");
+        exit(1);
+    }
+
+    output_append(buffer, line, (size_t)count);
+}
+
+
+// The error line goes through the same buffer as normal results, so the
+// caller can reset the buffer first and then write only this one line.
+// The count test is checked before the cast to size_t, because a negative
+// int would turn into a huge unsigned number.
+static void output_error(OutputBuffer *buffer, size_t position)
+{
+    char line[64];
+    int count = snprintf(line, sizeof line, "ERROR:%zu\n", position);
+
+    if (count < 0 || (size_t)count >= sizeof line) {
+        fprintf(stderr, "Cannot format result\n");
+        exit(1);
+    }
+
+    output_append(buffer, line, (size_t)count);
+}
+
+
+// Only length is cleared. The allocated block stays, so when an error
+// throws away the partial results, or the next file starts, the memory is
+// reused instead of being allocated again.
+static void output_reset(OutputBuffer *buffer)
+{
+    buffer->length = 0;
+}
+
+
+// Pointers are set to NULL and sizes to 0 after free so a second call, or
+// a later append, cannot touch freed memory. Every exit path must call
+// this, otherwise the sanitizer build reports a leak.
+static void output_free(OutputBuffer *buffer)
+{
+    free(buffer->data);
+    buffer->data = NULL;
+    buffer->length = 0;
+    buffer->capacity = 0;
+}
