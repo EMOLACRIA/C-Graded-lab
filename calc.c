@@ -291,6 +291,57 @@ static Token next_token(Tokenizer *t)
         return token;
     }
 
+
+
+    // A number is scanned by hand first, and only then converted. The scan
+    // decides where the token ends, and index is left exactly there, so
+    // strtod/strtoll never decide the token length. This matters because
+    // strtod also accepts forms the task forbids, such as 1.5e3, .5 and 5.
+    // Here a '.' is taken only if a digit follows it. So "5." is the
+    // integer 5 followed by an invalid '.', "1.5e3" is 1.5 followed by an
+    // invalid 'e', and ".5" never enters this branch because '.' is not a
+    // digit. The three forbidden forms need no extra code and the error
+    // lands on the '.' or the 'e' as the task requires.
+    // The int/float decision is made by the '.': a number with a decimal
+    // part is a float, any other number is an integer.
+    // Both checks put "index < length" first so the text is never read past
+    // its end. (unsigned char) is used because isdigit with a negative char
+    // value is undefined behaviour.
+    if (isdigit((unsigned char)t->text[t->index])) {
+        size_t start = t->index;
+        int is_float = 0;
+
+        while (t->index < t->length &&
+               isdigit((unsigned char)t->text[t->index])) {
+            t->index++;
+        }
+
+        if (t->index + 1 < t->length &&
+            t->text[t->index] == '.' &&
+            isdigit((unsigned char)t->text[t->index + 1])) {
+            is_float = 1;
+            t->index++;
+
+            while (t->index < t->length &&
+                   isdigit((unsigned char)t->text[t->index])) {
+                t->index++;
+            }
+        }
+
+        // The '\0' stored after the file data (see read_file) stops these
+        // two functions at the end of the text. Base 10 is given on purpose
+        // so a leading 0 does not turn the number into octal.
+        if (is_float) {
+            token.value.real = strtod(t->text + start, NULL);
+        } else {
+            token.value.integer = strtoll(t->text + start, NULL, 10);
+        }
+
+        token.value.is_float = is_float;
+        token.type = TOK_NUMBER;
+        return token;
+    }
+
     switch (t->text[t->index]) {
         case '+':
             token.type = TOK_PLUS;
