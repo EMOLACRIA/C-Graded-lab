@@ -633,3 +633,102 @@ static Value parse_power(Parser *p)
     check_finite(result, op_pos);
     return result;
 }
+
+
+// term uses a loop and not recursion, so * and / group from the left:
+// 8 / 4 / 2 is (8 / 4) / 2 = 1. Recursing on the right side, as power
+// does, would give 8 / (4 / 2) = 4, which is wrong. The calls to
+// parse_power are what give * and / a lower precedence than **, because
+// every operand of * and / is a whole power.
+// Two positions are saved before the tokens are consumed: op_pos is the
+// operator, used when a float result is infinite or not a number, and
+// right_pos is the first token of the right operand, which is where the
+// task reports a division by zero. They differ, so "4 / 0" reports the
+// '0', not the '/'.
+// first_error_pos is checked after every call that can fail, including
+// after the division itself, so the loop stops at the first error instead
+// of going on with the zero Value that value_div returns.
+static Value parse_term(Parser *p)
+{
+    Value left = parse_power(p);
+
+    if (first_error_pos != 0) {
+        return left;
+    }
+
+    while (p->current.type == TOK_STAR ||
+           p->current.type == TOK_SLASH) {
+        TokenType op = p->current.type;
+        size_t op_pos = p->current.position;
+
+        advance(p);
+        size_t right_pos = p->current.position;
+
+        Value right = parse_power(p);
+
+        if (first_error_pos != 0) {
+            return right;
+        }
+
+        if (op == TOK_STAR) {
+            left = value_mul(left, right);
+        } else {
+            left = value_div(left, right, right_pos);
+        }
+
+        check_finite(left, op_pos);
+
+        if (first_error_pos != 0) {
+            return left;
+        }
+           }
+
+    return left;
+}
+
+// expr is the lowest precedence level, so + and - get their operands from
+// parse_term. Every operand is a whole term, which means 3 + 2 * 5 reads
+// the right side of the '+' as 2 * 5 and * binds tighter than +. The
+// precedence comes from which function is called, there is no table.
+// Like term, this is a loop, so + and - group from the left:
+// 10 - 3 - 2 is (10 - 3) - 2 = 5, not 10 - (3 - 2) = 9.
+// op_pos is saved before advance, because a float result that is infinite
+// or not a number is reported at the operator. There is no right_pos here:
+// + and - have no error that is reported at the right operand.
+// first_error_pos is checked after each call that can fail, so a reported
+// error stops the loop immediately.
+static Value parse_expr(Parser *p)
+{
+    Value left = parse_term(p);
+
+    if (first_error_pos != 0) {
+        return left;
+    }
+
+    while (p->current.type == TOK_PLUS ||
+           p->current.type == TOK_MINUS) {
+        TokenType op = p->current.type;
+        size_t op_pos = p->current.position;
+
+        advance(p);
+        Value right = parse_term(p);
+
+        if (first_error_pos != 0) {
+            return right;
+        }
+
+        if (op == TOK_PLUS) {
+            left = value_add(left, right);
+        } else {
+            left = value_sub(left, right);
+        }
+
+        check_finite(left, op_pos);
+
+        if (first_error_pos != 0) {
+            return left;
+        }
+           }
+
+    return left;
+}
