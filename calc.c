@@ -843,3 +843,82 @@ int main(int argc, char **argv)
     output_free(&out);
     return 0;
 }
+
+// Takes the last part of a path as the base name: "../in/a.txt" gives "a"
+// and "labs/" gives "labs". Trailing '/' are dropped first, otherwise the
+// last part of "labs/" would look empty. strip_txt is 1 for an input file
+// and 0 for a folder given with -d, because a folder named "data.txt" must
+// keep its name. The suffix is copied into a 5-byte array and compared
+// there, so the comparison never runs past the end of the part. The length
+// must be above 4, so a file that is exactly ".txt" is not turned into an
+// empty name. An empty result is an error, and so is a name that does not
+// fit in out, so out is never written past its size.
+static int base_name(const char *path, int strip_txt, char *out, size_t size)
+{
+    size_t end = strlen(path);
+    size_t start;
+    size_t length;
+
+    while (end > 0 && path[end - 1] == '/') {
+        end--;
+    }
+
+    start = end;
+    while (start > 0 && path[start - 1] != '/') {
+        start--;
+    }
+
+    length = end - start;
+
+    if (strip_txt && length > 4) {
+        char suffix[5];
+
+        memcpy(suffix, path + end - 4, 4);
+        suffix[4] = '\0';
+
+        if (strcmp(suffix, ".txt") == 0) {
+            length -= 4;
+        }
+    }
+
+    if (length == 0) {
+        return -1;
+    }
+
+    if (length >= size) {
+        return -1;
+    }
+
+    memcpy(out, path + start, length);
+    out[length] = '\0';
+    return 0;
+}
+
+// The result file name is <base>_<name>_<lastname>_<id>.txt, exactly the
+// form the task gives. snprintf is checked for a negative value before the
+// cast to size_t, and for truncation, so a long name is an error and never
+// a cut-off file name.
+static int result_file_name(char *out, size_t size, const char *base)
+{
+    int count = snprintf(out, size, "%s_%s_%s_%s.txt",
+                         base, STUDENT_NAME, STUDENT_LASTNAME, STUDENT_ID);
+
+    if (count < 0 || (size_t)count >= size) {
+        return -1;
+    }
+    return 0;
+}
+
+// The default output folder has no last name: <base>_<name>_<id>, like
+// "labs_anna_221234" in the task. It is created in the current folder, not
+// next to the input.
+static int default_dir_name(char *out, size_t size, const char *base)
+{
+    int count = snprintf(out, size, "%s_%s_%s",
+                         base, STUDENT_NAME, STUDENT_ID);
+
+    if (count < 0 || (size_t)count >= size) {
+        return -1;
+    }
+    return 0;
+}
