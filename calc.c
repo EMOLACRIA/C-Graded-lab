@@ -474,3 +474,49 @@ static Value value_div(Value a, Value b, size_t right_pos)
 
     return result;
 }
+
+// Two paths. If either side is a float, pow() is used, so 0.5 ** (0 - 1)
+// is 2 and a negative exponent is fine. Only int ** int is integer
+// arithmetic, and there a negative exponent is an error at exp_pos, the
+// start of the exponent, as the task requires.
+// The integer power uses repeated squaring: each loop step handles one bit
+// of the exponent, so 1 ** 1000000000 takes about 30 steps instead of a
+// billion multiplications. The result starts at 1, so x ** 0 is 1,
+// including 0 ** 0, without a special case.
+// The base is squared only while the exponent is still above 0. A final
+// squaring would be wasted and could overflow a long long, for example
+// 3 ** 39 fits but squaring 3 ** 32 again does not, and signed overflow is
+// undefined behaviour.
+static Value value_pow(Value a, Value b, size_t exp_pos)
+{
+    Value result = {0};
+
+    if (a.is_float || b.is_float) {
+        result.is_float = 1;
+        result.real = pow(value_as_double(a), value_as_double(b));
+        return result;
+    }
+
+    if (b.integer < 0) {
+        set_error(exp_pos);
+        return result;
+    }
+
+    long long base = a.integer;
+    long long exponent = b.integer;
+    result.integer = 1;
+
+    while (exponent > 0) {
+        if (exponent % 2 != 0) {
+            result.integer *= base;
+        }
+
+        exponent /= 2;
+
+        if (exponent > 0) {
+            base *= base;
+        }
+    }
+
+    return result;
+}
