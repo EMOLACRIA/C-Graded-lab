@@ -533,3 +533,62 @@ static void check_finite(Value v, size_t op_pos)
         set_error(op_pos);
     }
 }
+
+
+// The parser holds the tokenizer and the one token it is looking at. Every
+// error is reported at current.position, the start of the token the parser
+// could not use, which is the position rule of the task. Keeping that one
+// token here means each function can report an error without asking the
+// tokenizer again.
+typedef struct {
+    Tokenizer tz;
+    Token current;
+} Parser;
+
+static void advance(Parser *p)
+{
+    p->current = next_token(&p->tz);
+}
+
+// parse_primary calls parse_expr for the inside of parentheses, and
+// parse_expr reaches parse_primary again through the lower levels, so the
+// function has to be declared before it is defined.
+static Value parse_expr(Parser *p);
+
+// primary is the innermost level of the grammar: a number or a
+// parenthesised expression. Any other token here means an operand is
+// missing, so the error is at that token: a second operator in "7 + * 3",
+// the '\n' in "3 *", the ')' in "2 * ()" and an invalid character such as
+// '&'. For "(2 + 3" the closing ')' is missing, so the error is at the
+// token that appeared instead, the '\n'.
+// There is no longjmp, so after parse_expr returns, first_error_pos is
+// checked. Otherwise the code would go on looking for ')' after an error
+// that was already reported. After an error a zero Value is returned; the
+// callers never use it, they see first_error_pos is set and stop.
+static Value parse_primary(Parser *p) {
+    if (p->current.type == TOK_NUMBER) {
+        Value value = p->current.value;
+        advance(p);
+        return value;
+    }
+
+    if (p->current.type == TOK_LPAREN) {
+        advance(p);
+        Value value = parse_expr(p);
+
+        if (first_error_pos != 0) {
+            return value;
+        }
+
+        if (p->current.type != TOK_RPAREN) {
+            set_error(p->current.position);
+            return (Value){0};
+        }
+
+        advance(p);
+        return value;
+    }
+
+    set_error(p->current.position);
+    return (Value){0};
+}
