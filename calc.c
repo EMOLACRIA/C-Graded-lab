@@ -1,7 +1,7 @@
 // Emirhan Kucukyilmaz 251ADB105
 // https://github.com/EMOLACRIA/C-Graded-lab
 // Compile with: gcc -O2 -Wall -Wextra -std=c17 -o calc calc.c -lm
-// Resources used: Claude (Anthropic) - <bu konuşmanın paylaşım linki>
+// Resources used: Claude (Anthropic) - https://claude.ai/share/ab638105-2889-490c-8e4a-a3dff83da9b6
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,10 +16,15 @@
 #define STUDENT_LASTNAME "kucukyilmaz"
 #define STUDENT_ID "251ADB105"
 
-//################################################################################//
-// AI (Claude): prompt "Write the comments for my code" Link: <conversation link> //
-// I wrote the code myself; Claude wrote the explanatory comments.                //
-//################################################################################//
+// AI (Claude, Anthropic). Conversation history:
+// https://claude.ai/share/ab638105-2889-490c-8e4a-a3dff83da9b6
+// I asked Claude to explain each part step by step (which data structures
+// and C functions to use), to review the code I wrote, and to write the
+// explanatory comments from my finished code. I typed the code myself,
+// except the three-line empty-name check in base_name, which Claude
+// suggested. Example prompt (translated from Turkish): "split the code
+// into sections; for each section tell me what to write, but do not give
+// me the code".
 
 // A result is either an integer or a float, never both. is_float says which
 // field is valid: 0 means use "integer", 1 means use "real". If either
@@ -607,6 +612,11 @@ static Value parse_primary(Parser *p) {
 // After each recursive call first_error_pos is checked, so a reported
 // error stops the calculation instead of feeding an unused zero Value to
 // value_pow.
+// Known limit: the recursion depth grows by one level per ** in a chain.
+// With an 8 MB stack the -O2 build handled a chain of 50,000 ** and failed
+// at 100,000; the sanitizer build uses larger frames and failed at 50,000.
+// I kept the recursion because it is the grammar given in the task, and
+// the task only guarantees 1000 nested parentheses.
 static Value parse_power(Parser *p)
 {
     Value left = parse_primary(p);
