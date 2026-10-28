@@ -922,3 +922,34 @@ static int default_dir_name(char *out, size_t size, const char *base)
     }
     return 0;
 }
+
+// Creates the output folder, and accepts one that already exists, as the
+// task allows writing into an existing folder. Only the last level is
+// created, because the task says the parent folder exists.
+// If mkdir fails for any reason other than "already exists", errno is left
+// as it is, so the caller can print strerror(errno) for the real cause.
+// EEXIST alone is not enough: a regular file with the same name also gives
+// EEXIST, so stat checks that it is really a folder. In that case errno is
+// set to ENOTDIR so the message says what is wrong.
+static int make_output_dir(const char *dir)
+{
+    if (mkdir(dir, 0777) == 0) {
+        return 0;
+    }
+
+    if (errno != EEXIST) {
+        return -1;
+    }
+
+    struct stat info;
+    if (stat(dir, &info) != 0) {
+        return -1;
+    }
+
+    if (!S_ISDIR(info.st_mode)) {
+        errno = ENOTDIR;
+        return -1;
+    }
+
+    return 0;
+}
