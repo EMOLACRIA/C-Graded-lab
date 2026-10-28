@@ -732,3 +732,87 @@ static Value parse_expr(Parser *p)
 
     return left;
 }
+
+
+// The loop walks the file once, line by line, and index i is always a
+// position in the whole file, so the tokenizer positions already count
+// every character, including blank lines and comment lines. Nothing has to
+// be recounted per line.
+// first_error_pos is reset first because it is a global: with -d several
+// files are evaluated in one run, and an error of one file must not leak
+// into the next.
+// Blank lines and comment lines produce no output. Only a '#' that is the
+// first non-blank character starts a comment; a '#' later in a line is
+// not seen here, so the tokenizer reports it as an invalid character, as
+// the task requires. The end of the file is decided by length and not by
+// '\0', because a '\0' byte in the file is an invalid character, not an end.
+// After parse_expr the line must be finished. If the current token is not
+// TOK_EOL, something is left that the grammar cannot use, such as the
+// second ')' in "(1 + 2))", so the error is at that token.
+// On any error the partial results are thrown away with output_reset and
+// only ERROR:<pos> is written, because the task allows no partial output.
+// Since parse_expr stops at the first error, the first line with an error
+// is also the first error in the file.
+// TOK_EOL does not move the index, so after a line i points at its '\n'
+// or at the end of the file; the '\n' is skipped here so the next turn
+// starts on a new line.
+static void evaluate_text(const OutputBuffer *input, OutputBuffer *output)
+{
+    const char *text = input->data;
+    size_t i = 0;
+
+    first_error_pos = 0;
+
+    while (i < input->length) {
+        size_t j = i;
+
+        while (j < input->length &&
+               (text[j] == ' ' || text[j] == '\t')) {
+            j++;
+               }
+
+        if (j >= input->length || text[j] == '\n') {
+            if (j < input->length) {
+                j++;
+            }
+            i = j;
+            continue;
+        }
+
+        if (text[j] == '#') {
+            while (j < input->length && text[j] != '\n') {
+                j++;
+            }
+            if (j < input->length) {
+                j++;
+            }
+            i = j;
+            continue;
+        }
+
+        Parser p = {0};
+        p.tz.text = text;
+        p.tz.length = input->length;
+        p.tz.index = i;
+
+        advance(&p);
+        Value v = parse_expr(&p);
+
+        if (first_error_pos == 0 && p.current.type != TOK_EOL) {
+            set_error(p.current.position);
+        }
+
+        if (first_error_pos != 0) {
+            output_reset(output);
+            output_error(output, first_error_pos);
+            return;
+        }
+
+        output_value(output, v);
+
+        i = p.tz.index;
+        if (i < input->length && text[i] == '\n') {
+            i++;
+        }
+    }
+}
