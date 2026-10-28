@@ -520,3 +520,16 @@ static Value value_pow(Value a, Value b, size_t exp_pos)
 
     return result;
 }
+
+// Overflow to infinity and invalid results such as (0 - 8) ** 0.5 only
+// show up in the double result, and the task reports them at the operator,
+// which only the parser knows. So the arithmetic functions stay free of
+// positions and the parser calls this after each operation instead.
+// isfinite catches both infinity and NaN in one test. Integers are never
+// checked: the task says the tests do not overflow them.
+static void check_finite(Value v, size_t op_pos)
+{
+    if (v.is_float && !isfinite(v.real)) {
+        set_error(op_pos);
+    }
+}
