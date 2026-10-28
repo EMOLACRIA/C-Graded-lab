@@ -592,3 +592,44 @@ static Value parse_primary(Parser *p) {
     set_error(p->current.position);
     return (Value){0};
 }
+
+
+// power calls itself for the exponent, so 2 ** 3 ** 2 groups as
+// 2 ** (3 ** 2) = 512. That is why ** is right-associative here: the
+// right side is parsed first, as a whole power. A loop like the one in
+// term would group it as (2 ** 3) ** 2 = 64, which is wrong.
+// Two positions are saved before the tokens are consumed. op_pos is the
+// '**' itself, used when a float result is infinite or not a number, as
+// the task reports that at the operator. exp_pos is the first token of
+// the exponent, used for a negative integer exponent, which the task
+// reports at the start of the exponent. Both must be read before advance
+// moves current on.
+// After each recursive call first_error_pos is checked, so a reported
+// error stops the calculation instead of feeding an unused zero Value to
+// value_pow.
+static Value parse_power(Parser *p)
+{
+    Value left = parse_primary(p);
+
+    if (first_error_pos != 0) {
+        return left;
+    }
+
+    if (p->current.type != TOK_POWER) {
+        return left;
+    }
+
+    size_t op_pos = p->current.position;
+    advance(p);
+    size_t exp_pos = p->current.position;
+
+    Value right = parse_power(p);
+
+    if (first_error_pos != 0) {
+        return right;
+    }
+
+    Value result = value_pow(left, right, exp_pos);
+    check_finite(result, op_pos);
+    return result;
+}
