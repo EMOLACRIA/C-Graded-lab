@@ -953,3 +953,177 @@ static int make_output_dir(const char *dir)
 
     return 0;
 }
+
+
+// Evaluates one input file and writes its result file into out_dir.
+// An ERROR:<pos> result is a normal result, so it returns 0; only a real
+// failure (unreadable input, folder or file that cannot be written)
+// returns -1, and main turns that into a non-zero exit code.
+// The file is read and evaluated before the output folder is created, so a
+// missing input file does not leave an empty folder behind.
+// Every failure jumps to one cleanup label instead of freeing in each
+// branch, so both buffers are freed on every path and the sanitizer build
+// reports no leak. All variables are declared before the first goto, so no
+// jump passes a declaration. in and out start zeroed, which makes
+// output_free safe even if read_file already freed in.
+// errno is saved right after the failing call because fprintf may change
+// it. When a call leaves it at 0, EIO is used so the message never says
+// "Success" for an error.
+// fclose is checked as well: a write error such as a full disk may only
+// appear there. When out.length is 0 (the file had only comments or blank
+// lines) fwrite is skipped, because out.data may be NULL, and an empty
+// result file is written.
+static int process_file(const char *input_path, const char *out_dir)
+{
+    OutputBuffer in = {0};
+    OutputBuffer out = {0};
+    char base[4096];
+    char name[4096];
+    char full[4096];
+    FILE *f;
+    int count;
+    int write_error = 0;
+    int status = -1;
+
+    if (base_name(input_path, 1, base, sizeof base) == -1 ||
+        result_file_name(name, sizeof name, base) == -1) {
+        fprintf(stderr, "Invalid file name: '%s'\n", input_path);
+        goto cleanup;
+    }
+
+    count = snprintf(full, sizeof full, "%s/%s", out_dir, name);
+    if (count < 0 || (size_t)count >= sizeof full) {
+        fprintf(stderr, "Output path is too long: '%s/%s'\n",
+                out_dir, name);
+        goto cleanup;
+    }
+
+    errno = 0;
+    if (read_file(input_path, &in) == -1) {
+        int saved_errno = errno;
+        fprintf(stderr, "Cannot read '%s': %s\n", input_path,
+                strerror(saved_errno != 0 ? saved_errno : EIO));
+        goto cleanup;
+    }
+
+    evaluate_text(&in, &out);
+
+    if (make_output_dir(out_dir) == -1) {
+        int saved_errno = errno;
+        fprintf(stderr, "Cannot create directory '%s': %s\n",
+                out_dir, strerror(saved_errno));
+        goto cleanup;
+    }
+
+    errno = 0;
+    f = fopen(full, "wb");
+    if (f == NULL) {
+        int saved_errno = errno;
+        fprintf(stderr, "Cannot open '%s': %s\n", full,
+                strerror(saved_errno != 0 ? saved_errno : EIO));
+        goto cleanup;
+    }
+
+    if (out.length > 0) {
+        errno = 0;
+        if (fwrite(out.data, 1, out.length, f) != out.length) {
+            int saved_errno = errno;
+            fprintf(stderr, "Cannot write '%s': %s\n", full,
+                    strerror(saved_errno != 0 ? saved_errno : EIO));
+            write_error = 1;
+        }
+    }
+
+    errno = 0;
+    if (fclose(f) != 0) {
+        int saved_errno = errno;
+        fprintf(stderr, "Cannot close '%s': %s\n", full,
+                strerror(saved_errno != 0 ? saved_errno : EIO));
+        write_error = 1;
+    }
+
+    if (!write_error) {
+        status = 0;
+    }
+
+cleanup:
+    output_free(&in);
+    output_free(&out);
+    return status;
+}
+
+
+// Evaluates every *.txt file directly inside dir. Files without the .txt
+// ending and sub folders are skipped: a name is checked by its last four
+// characters, and stat with S_ISREG makes sure it is a regular file, so a
+// folder named like "x.txt" is ignored too. DT_REG is not used because it
+// is not defined under -std=c17.
+// A failure in one file does not stop the others. status becomes -1 and the
+// loop goes on, so one bad file does not keep the rest from being written;
+// every failing file has already printed its own message.
+// readdir returns NULL both at the end of the folder and on an error, so
+// errno is set to 0 before each call. After the loop a non-zero errno
+// means a real read error.
+static int process_dir(const char *dir, const char *out_dir)
+{
+    DIR *d = opendir(dir);
+    struct dirent *entry;
+    struct stat info;
+    char path[4096];
+    int status = 0;
+
+    if (d == NULL) {
+        int saved_errno = errno;
+        fprintf(stderr, "Cannot open directory '%s': %s\n",
+                dir, strerror(saved_errno));
+        return -1;
+    }
+
+    while ((errno = 0, (entry = readdir(d)) != NULL)) {
+        const char *name = entry->d_name;
+        size_t len = strlen(name);
+
+        if (len < 4 || strcmp(name + len - 4, ".txt") != 0) {
+            continue;
+        }
+
+        int count = snprintf(path, sizeof path, "%s/%s", dir, name);
+        if (count < 0 || (size_t)count >= sizeof path) {
+            fprintf(stderr, "Input path is too long: '%s/%s'\n", dir, name);
+            status = -1;
+            continue;
+        }
+
+        if (stat(path, &info) != 0) {
+            int saved_errno = errno;
+            fprintf(stderr, "Cannot inspect '%s': %s\n",
+                    path, strerror(saved_errno));
+            status = -1;
+            continue;
+        }
+
+        if (!S_ISREG(info.st_mode)) {
+            continue;
+        }
+
+        if (process_file(path, out_dir) == -1) {
+            status = -1;
+        }
+    }
+
+    if (errno != 0) {
+        int saved_errno = errno;
+        fprintf(stderr, "Cannot read directory '%s': %s\n",
+                dir, strerror(saved_errno));
+        status = -1;
+    }
+
+    if (closedir(d) != 0) {
+        int saved_errno = errno;
+        fprintf(stderr, "Cannot close directory '%s': %s\n",
+                dir, strerror(saved_errno));
+        status = -1;
+    }
+
+    return status;
+}
