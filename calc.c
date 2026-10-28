@@ -817,31 +817,90 @@ static void evaluate_text(const OutputBuffer *input, OutputBuffer *output)
     }
 }
 
+
+
+static int base_name(const char *path, int strip_txt, char *out, size_t size);
+static int default_dir_name(char *out, size_t size, const char *base);
+static int process_file(const char *input_path, const char *out_dir);
+static int process_dir(const char *dir, const char *out_dir);
+// Arguments are read in one pass, so the options may come before or after
+// the input file. -d/--dir and -o/--output-dir take the next argument as
+// their value; a missing value, an unknown option, a second input file, or
+// no input at all is a usage error that goes to stderr with exit code 1,
+// as the task requires. Giving both a file and -d has no meaning in the
+// task, so it is reported as an error too.
+// Without -o the default folder name is built from the input: for a file
+// the ".txt" is dropped (strip_txt is 1), for a folder given with -d the
+// name is kept as it is. The folder is created in the current folder, not
+// next to the input.
+// An ERROR:<pos> result inside a file is not a failure: process_file and
+// process_dir return -1 only for real problems (unreadable input or a
+// result that cannot be written), and only those give exit code 1.
 int main(int argc, char **argv)
 {
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s <input-file>\n", argv[0]);
+    const char *input = NULL;
+    const char *dir = NULL;
+    const char *out_dir = NULL;
+    char default_out[4096];
+    char base[4096];
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-d") == 0 ||
+            strcmp(argv[i], "--dir") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Missing value for %s\n", argv[i]);
+                return 1;
+            }
+            dir = argv[++i];
+        } else if (strcmp(argv[i], "-o") == 0 ||
+                   strcmp(argv[i], "--output-dir") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Missing value for %s\n", argv[i]);
+                return 1;
+            }
+            out_dir = argv[++i];
+        } else if (argv[i][0] == '-') {
+            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            fprintf(stderr,
+                    "Usage: %s [-o OUTDIR] FILE | %s -d DIR [-o OUTDIR]\n",
+                    argv[0], argv[0]);
+            return 1;
+        } else {
+            if (input != NULL) {
+                fprintf(stderr, "Too many input files\n");
+                return 1;
+            }
+            input = argv[i];
+        }
+    }
+
+    if (input == NULL && dir == NULL) {
+        fprintf(stderr,
+                "Usage: %s [-o OUTDIR] FILE | %s -d DIR [-o OUTDIR]\n",
+                argv[0], argv[0]);
         return 1;
     }
 
-    OutputBuffer in = {0};
-    OutputBuffer out = {0};
-
-    if (read_file(argv[1], &in) == -1) {
-        fprintf(stderr, "Cannot read '%s': %s\n",
-                argv[1], strerror(errno));
+    if (input != NULL && dir != NULL) {
+        fprintf(stderr, "Choose either an input file or a directory\n");
         return 1;
     }
 
-    evaluate_text(&in, &out);
-
-    if (out.length != 0) {
-        fwrite(out.data, 1, out.length, stdout);
+    if (out_dir == NULL) {
+        if (base_name(dir != NULL ? dir : input, dir == NULL,
+                      base, sizeof base) == -1 ||
+            default_dir_name(default_out, sizeof default_out, base) == -1) {
+            fprintf(stderr, "Invalid or too long default output directory name\n");
+            return 1;
+        }
+        out_dir = default_out;
     }
 
-    output_free(&in);
-    output_free(&out);
-    return 0;
+    if (dir != NULL) {
+        return process_dir(dir, out_dir) == -1 ? 1 : 0;
+    }
+
+    return process_file(input, out_dir) == -1 ? 1 : 0;
 }
 
 // Takes the last part of a path as the base name: "../in/a.txt" gives "a"
