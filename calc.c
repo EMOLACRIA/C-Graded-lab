@@ -816,3 +816,30 @@ static void evaluate_text(const OutputBuffer *input, OutputBuffer *output)
         }
     }
 }
+
+int main(int argc, char **argv)
+{
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <input-file>\n", argv[0]);
+        return 1;
+    }
+
+    OutputBuffer in = {0};
+    OutputBuffer out = {0};
+
+    if (read_file(argv[1], &in) == -1) {
+        fprintf(stderr, "Cannot read '%s': %s\n",
+                argv[1], strerror(errno));
+        return 1;
+    }
+
+    evaluate_text(&in, &out);
+
+    if (out.length != 0) {
+        fwrite(out.data, 1, out.length, stdout);
+    }
+
+    output_free(&in);
+    output_free(&out);
+    return 0;
+}
